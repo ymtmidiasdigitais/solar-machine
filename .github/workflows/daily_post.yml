@@ -25,7 +25,24 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests PyNaCl
+
+      - name: Refresh Instagram token (weekly, every Sunday)
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' && contains('0', format('{0}', github.run_number)) || (contains(github.event.schedule, '0 14') && (github.run_attempt == 1))
+        env:
+          IG_APP_ID: ${{ secrets.IG_APP_ID }}
+          IG_APP_SECRET: ${{ secrets.IG_APP_SECRET }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          # Refresh token every Sunday (day of week = 0)
+          DAY=$(date +%u)
+          if [ "$DAY" = "7" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Refreshing token (Sunday or manual trigger)..."
+            python refresh_token.py
+          else
+            echo "Not Sunday — skipping token refresh (day=$DAY)"
+          fi
 
       - name: Publish next post
         env:
