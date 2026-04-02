@@ -1,0 +1,42 @@
+name: Daily Instagram Post
+
+on:
+  schedule:
+    # Runs every day at 11:00 AM Brazil time (BRT = UTC-3 → 14:00 UTC)
+    - cron: '0 14 * * *'
+  workflow_dispatch:  # allows manual trigger from GitHub UI
+
+permissions:
+  contents: write  # needed to commit state.json back to repo
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Publish next post
+        env:
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+        run: python publisher.py
+
+      - name: Commit updated state
+        run: |
+          git config user.name "solar-publisher[bot]"
+          git config user.email "bot@solarmachine.com.br"
+          git add state.json
+          git diff --staged --quiet || git commit -m "chore: update publish state [skip ci]"
+          git push
