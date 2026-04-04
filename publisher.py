@@ -10,6 +10,22 @@ import os
 import sys
 import time
 import requests
+from requests.exceptions import HTTPError
+
+# ── Retry logic for transient Meta API errors ────────────────────────────────
+MAX_RETRIES = 4
+RETRY_DELAYS = [5, 15, 30, 60]
+
+def api_post(url, params, timeout=30):
+    """POST to Meta Graph API with automatic retry on 5xx errors."""
+    for attempt, delay in enumerate(RETRY_DELAYS, start=1):
+        resp = requests.post(url, params=params, timeout=timeout)
+        if resp.status_code < 500:
+            return resp
+        log(f"  ⚠ Meta API {resp.status_code} (attempt {attempt}/{MAX_RETRIES}) — retrying in {delay}s...")
+        time.sleep(delay)
+    resp.raise_for_status()
+    return resp
 
 # ── Config from environment ──────────────────────────────────────────────────
 IG_USER_ID   = os.environ["IG_USER_ID"]
@@ -48,14 +64,13 @@ container_ids = []
 for card_path in post["cards"]:
     image_url = f"{BASE_URL}/{card_path}"
     log(f"  Creating container for {card_path}")
-    resp = requests.post(
+    resp = api_post(
         f"{GRAPH_URL}/{IG_USER_ID}/media",
         params={
             "image_url": image_url,
             "is_carousel_item": "true",
             "access_token": ACCESS_TOKEN,
         },
-        timeout=30,
     )
     resp.raise_for_status()
     data = resp.json()
@@ -68,7 +83,7 @@ for card_path in post["cards"]:
 
 # ── Step 2: Create carousel container ────────────────────────────────────────
 log("Creating carousel container...")
-resp = requests.post(
+resp = api_post(
     f"{GRAPH_URL}/{IG_USER_ID}/media",
     params={
         "media_type": "CAROUSEL",
@@ -76,7 +91,6 @@ resp = requests.post(
         "caption": post["caption"],
         "access_token": ACCESS_TOKEN,
     },
-    timeout=30,
 )
 resp.raise_for_status()
 data = resp.json()
@@ -92,13 +106,12 @@ time.sleep(5)
 
 # ── Step 4: Publish ───────────────────────────────────────────────────────────
 log("Publishing...")
-resp = requests.post(
+resp = api_post(
     f"{GRAPH_URL}/{IG_USER_ID}/media_publish",
     params={
         "creation_id": carousel_id,
         "access_token": ACCESS_TOKEN,
     },
-    timeout=30,
 )
 resp.raise_for_status()
 data = resp.json()
