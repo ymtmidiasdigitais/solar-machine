@@ -57,59 +57,83 @@ if next_index >= len(posts):
     sys.exit(0)
 
 post = posts[next_index]
-log(f"Publishing post {next_index + 1}/{len(posts)}: {post['id']}")
+is_carousel = len(post["cards"]) > 1
+log(f"Publishing post {next_index + 1}/{len(posts)}: {post['id']} ({'carousel' if is_carousel else 'single image'})")
 
-# ── Step 1: Create media containers for each card ────────────────────────────
-container_ids = []
-for card_path in post["cards"]:
-    image_url = f"{BASE_URL}/{card_path}"
-    log(f"  Creating container for {card_path}")
+if is_carousel:
+    # ── Carousel flow (2+ cards) ─────────────────────────────────────────────
+
+    # Step 1: Create media containers for each card
+    container_ids = []
+    for card_path in post["cards"]:
+        image_url = f"{BASE_URL}/{card_path}"
+        log(f"  Creating container for {card_path}")
+        resp = api_post(
+            f"{GRAPH_URL}/{IG_USER_ID}/media",
+            params={
+                "image_url": image_url,
+                "is_carousel_item": "true",
+                "access_token": ACCESS_TOKEN,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if "id" not in data:
+            log(f"ERROR creating container: {data}")
+            sys.exit(1)
+        container_ids.append(data["id"])
+        log(f"    Container ID: {data['id']}")
+        time.sleep(1)  # avoid rate limiting
+
+    # Step 2: Create carousel container
+    log("Creating carousel container...")
     resp = api_post(
         f"{GRAPH_URL}/{IG_USER_ID}/media",
         params={
-            "image_url": image_url,
-            "is_carousel_item": "true",
+            "media_type": "CAROUSEL",
+            "children": ",".join(container_ids),
+            "caption": post["caption"],
             "access_token": ACCESS_TOKEN,
         },
     )
     resp.raise_for_status()
     data = resp.json()
     if "id" not in data:
-        log(f"ERROR creating container: {data}")
+        log(f"ERROR creating carousel: {data}")
         sys.exit(1)
-    container_ids.append(data["id"])
-    log(f"    Container ID: {data['id']}")
-    time.sleep(1)  # avoid rate limiting
+    creation_id = data["id"]
+    log(f"Carousel container ID: {creation_id}")
 
-# ── Step 2: Create carousel container ────────────────────────────────────────
-log("Creating carousel container...")
-resp = api_post(
-    f"{GRAPH_URL}/{IG_USER_ID}/media",
-    params={
-        "media_type": "CAROUSEL",
-        "children": ",".join(container_ids),
-        "caption": post["caption"],
-        "access_token": ACCESS_TOKEN,
-    },
-)
-resp.raise_for_status()
-data = resp.json()
-if "id" not in data:
-    log(f"ERROR creating carousel: {data}")
-    sys.exit(1)
-carousel_id = data["id"]
-log(f"Carousel container ID: {carousel_id}")
+else:
+    # ── Single image flow (1 card) ────────────────────────────────────────────
+    image_url = f"{BASE_URL}/{post['cards'][0]}"
+    log(f"  Creating image container for {post['cards'][0]}")
+    resp = api_post(
+        f"{GRAPH_URL}/{IG_USER_ID}/media",
+        params={
+            "image_url": image_url,
+            "caption": post["caption"],
+            "access_token": ACCESS_TOKEN,
+        },
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if "id" not in data:
+        log(f"ERROR creating image container: {data}")
+        sys.exit(1)
+    creation_id = data["id"]
+    log(f"Image container ID: {creation_id}")
 
-# ── Step 3: Wait for containers to be ready ───────────────────────────────────
+# ── Wait for container to be ready ───────────────────────────────────────────
 log("Waiting for media to be ready...")
 time.sleep(5)
 
-# ── Step 4: Publish ───────────────────────────────────────────────────────────
+# ── Publish ───────────────────────────────────────────────────────────────────
 log("Publishing...")
 resp = api_post(
     f"{GRAPH_URL}/{IG_USER_ID}/media_publish",
     params={
-        "creation_id": carousel_id,
+        "creation_id": creation_id,
         "access_token": ACCESS_TOKEN,
     },
 )
